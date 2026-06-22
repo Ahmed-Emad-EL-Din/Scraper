@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("browser") {
                             BrowserScreen(
+                                viewModel = trackerViewModel,
                                 onBackToDashboard = {
                                     navController.popBackStack()
                                 }
