@@ -38,6 +38,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import kotlinx.coroutines.launch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +47,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -94,7 +98,7 @@ fun DashboardScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "WebView Tracker",
+                        text = "WebPage Monitor",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
@@ -320,11 +324,49 @@ fun ActiveRulesView(
             modifier = Modifier.fillMaxSize()
         ) {
             items(rules, key = { it.id }) { rule ->
-                RuleItemCard(
-                    rule = rule,
-                    onDelete = { onDelete(rule) },
-                    onTogglePause = { onTogglePause(rule) },
-                    onClick = { onRuleClick(rule) }
+                val dismissState = rememberSwipeToDismissBoxState(
+                    confirmValueChange = { dismissValue ->
+                        if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
+                            onDelete(rule)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                )
+
+                SwipeToDismissBox(
+                    state = dismissState,
+                    backgroundContent = {
+                        val color = when (dismissState.dismissDirection) {
+                            SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                            else -> Color.Transparent
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(color, RoundedCornerShape(12.dp))
+                                .padding(end = 16.dp),
+                            contentAlignment = Alignment.CenterEnd
+                        ) {
+                            if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Delete Rule",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    },
+                    enableDismissFromStartToEnd = false,
+                    content = {
+                        RuleItemCard(
+                            rule = rule,
+                            onDelete = { onDelete(rule) },
+                            onTogglePause = { onTogglePause(rule) },
+                            onClick = { onRuleClick(rule) }
+                        )
+                    }
                 )
             }
         }
@@ -457,31 +499,63 @@ fun RuleItemCard(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // History help hint
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = if (rule.isPaused) 
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) 
-                        else 
-                            MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(11.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Tap card to view comparative diff & change history logs",
-                        fontSize = 10.sp,
-                        color = if (rule.isPaused) 
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) 
-                        else 
-                            MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    // History help hint
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = if (rule.isPaused) 
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) 
+                            else 
+                                MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Tap card to view comparative details",
+                            fontSize = 10.sp,
+                            color = if (rule.isPaused) 
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) 
+                            else 
+                                MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    androidx.compose.material3.TextButton(
+                        onClick = onClick,
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            contentColor = if (rule.isPaused) IndigoPrimary.copy(alpha = 0.5f) else IndigoPrimary
+                        ),
+                        modifier = Modifier
+                            .height(28.dp)
+                            .testTag("history_button_${rule.id}"),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text("History", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 
@@ -557,6 +631,89 @@ fun SettingsDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("gemini_api_key_input")
                 )
+
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                var testStatus by remember { mutableStateOf<String?>(null) }
+                var isTesting by remember { mutableStateOf(false) }
+                var testSuccess by remember { mutableStateOf(false) }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            isTesting = true
+                            testStatus = null
+                            scope.launch {
+                                try {
+                                    val moshi = com.squareup.moshi.Moshi.Builder()
+                                        .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                                        .build()
+                                    val retrofitInstance = retrofit2.Retrofit.Builder()
+                                        .baseUrl("https://generativelanguage.googleapis.com/")
+                                        .addConverterFactory(retrofit2.converter.moshi.MoshiConverterFactory.create(moshi))
+                                        .build()
+                                    val service = retrofitInstance.create(com.example.worker.GeminiApiService::class.java)
+                                    val request = com.example.worker.GeminiRequest(
+                                        contents = listOf(
+                                            com.example.worker.GeminiRequest.Content(
+                                                parts = listOf(com.example.worker.GeminiRequest.Part(text = "Reply with exactly the word 'Hello'"))
+                                            )
+                                        )
+                                    )
+                                    val response = service.generateContent(
+                                        model = selectedModel,
+                                        apiKey = apiKey.trim(),
+                                        request = request
+                                    )
+                                    val reply = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+                                    if (reply.isNotEmpty()) {
+                                        testSuccess = true
+                                        testStatus = "Successful AI Connection"
+                                    } else {
+                                        testSuccess = false
+                                        testStatus = "Connection Failed: Empty Response"
+                                    }
+                                } catch (e: Exception) {
+                                    testSuccess = false
+                                    testStatus = "Connection Failed: ${e.localizedMessage ?: e.message}"
+                                } finally {
+                                    isTesting = false
+                                    android.widget.Toast.makeText(context, testStatus, android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        enabled = !isTesting && apiKey.trim().isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (testSuccess) Color(0xFF10B981) else MaterialTheme.colorScheme.secondary
+                        ),
+                        modifier = Modifier.testTag("test_api_key_btn")
+                    ) {
+                        Text(if (isTesting) "Testing..." else "Test Connection")
+                    }
+
+                    if (testStatus != null) {
+                        Text(
+                            text = if (testSuccess) "Connected" else "Failed",
+                            color = if (testSuccess) Color(0xFF10B981) else Color(0xFFEF4444),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.testTag("test_connection_status_label")
+                        )
+                    }
+                }
+
+                if (testStatus != null) {
+                    Text(
+                        text = testStatus ?: "",
+                        color = if (testSuccess) Color(0xFF10B981) else Color(0xFFEF4444),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
 
                 Column {
                     Text(
@@ -637,21 +794,54 @@ fun SettingsDialog(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         if (!isIgnoringBattery) {
+                            var showBatteryExplanation by remember { mutableStateOf(false) }
+
+                            if (showBatteryExplanation) {
+                                AlertDialog(
+                                    onDismissRequest = { showBatteryExplanation = false },
+                                    title = {
+                                        Text("Exempt Battery Optimization", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    },
+                                    text = {
+                                        Text(
+                                            "To guarantee timely, reliable background notifications of web page changes at your selected interval (e.g. 15 minutes), the app requires background exemption.\n\nPlay Store policies demand explicit explanation of power-saving exemptions. No battery is unnecessarily drained.",
+                                            fontSize = 14.sp
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                showBatteryExplanation = false
+                                                try {
+                                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                                        data = Uri.parse("package:${context.packageName}")
+                                                    }
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    try {
+                                                        val intentFallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                                        context.startActivity(intentFallback)
+                                                    } catch (e2: Exception) {
+                                                        Log.e("SettingsDialog", "Error requesting battery exemption", e2)
+                                                    }
+                                                }
+                                            }
+                                        ) {
+                                            Text("Grant Exemption")
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showBatteryExplanation = false }) {
+                                            Text("Cancel")
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                            }
+
                             Button(
                                 onClick = {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                            data = Uri.parse("package:${context.packageName}")
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        try {
-                                            val intentFallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                            context.startActivity(intentFallback)
-                                        } catch (e2: Exception) {
-                                            Log.e("SettingsDialog", "Error requesting battery exemption", e2)
-                                        }
-                                    }
+                                    showBatteryExplanation = true
                                 },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),

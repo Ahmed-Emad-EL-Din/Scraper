@@ -102,7 +102,7 @@ fun BrowserScreen(
     val cookieStorage = remember { CookieStorage(context) }
     
     // Banner / UI state variables
-    var showHeistBanner by remember { mutableStateOf(false) }
+    var showPersistenceBanner by remember { mutableStateOf(false) }
     var capturedDomain by remember { mutableStateOf("") }
     
     // Tracker setup interactive states
@@ -115,11 +115,11 @@ fun BrowserScreen(
 
     val sheetState = rememberModalBottomSheetState()
 
-    // Dismiss heist banner automatically after 3.5 seconds
-    LaunchedEffect(showHeistBanner) {
-        if (showHeistBanner) {
+    // Dismiss session persistence banner automatically after 3.5 seconds
+    LaunchedEffect(showPersistenceBanner) {
+        if (showPersistenceBanner) {
             delay(3500)
-            showHeistBanner = false
+            showPersistenceBanner = false
         }
     }
 
@@ -201,9 +201,9 @@ fun BrowserScreen(
                 }
             }
 
-            // Beautiful interactive cookie heist feedback banner
+            // Beautiful interactive session persistence feedback banner
             AnimatedVisibility(
-                visible = showHeistBanner,
+                visible = showPersistenceBanner,
                 enter = slideInVertically() + fadeIn(),
                 exit = slideOutVertically() + fadeOut()
             ) {
@@ -211,7 +211,7 @@ fun BrowserScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .testTag("cookie_heist_banner"),
+                        .testTag("session_persistence_banner"),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -223,7 +223,7 @@ fun BrowserScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Cookies Extracted",
+                            contentDescription = "Session Persistence Active",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(24.dp)
                         )
@@ -233,13 +233,13 @@ fun BrowserScreen(
                                 .padding(start = 12.dp)
                         ) {
                             Text(
-                                text = "Session Cookies Secured",
+                                text = "Seamless Login Integration",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Text(
-                                text = "Successfully captured & encrypted session variables for $capturedDomain",
+                                text = "Successfully loaded & encrypted session variables for $capturedDomain",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                             )
@@ -309,7 +309,7 @@ fun BrowserScreen(
                                     urlInput = pageUrl
                                     currentUrl = pageUrl
                                     
-                                    // Cookie heist extracting sequence
+                                    // Seamless session persistence tracking sequence
                                     val cookieManager = CookieManager.getInstance()
                                     val cookies = cookieManager.getCookie(pageUrl)
                                     
@@ -320,7 +320,7 @@ fun BrowserScreen(
                                         val domain = if (host.startsWith("www.")) host.substring(4) else host
                                         if (domain.isNotEmpty() && domain != "google.com") {
                                             capturedDomain = domain
-                                            showHeistBanner = true
+                                            showPersistenceBanner = true
                                         }
                                     }
 
@@ -835,10 +835,8 @@ fun FrequencySelector(
 ) {
     val options = listOf(
         Pair("15m", 15),
-        Pair("30m", 30),
         Pair("1h", 60),
-        Pair("4h", 240),
-        Pair("12h", 720),
+        Pair("6h", 360),
         Pair("24h", 1440)
     )
     Column(modifier = modifier) {

@@ -1,5 +1,5 @@
 {
-  "name": "WebView Tracker",
+  "name": "WebPage Monitor",
   "description": "Log into any website via WebView, select elements, and receive alerts when changes occur.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
