@@ -161,7 +161,10 @@ fun DashboardScreen(
         if (showSettingsDialog) {
             SettingsDialog(
                 settingsStorage = settingsStorage,
-                onDismiss = { showSettingsDialog = false }
+                onDismiss = { showSettingsDialog = false },
+                onSaveInterval = {
+                    viewModel.scheduleBackgroundChecks(context.applicationContext as android.app.Application)
+                }
             )
         }
     }
@@ -595,33 +598,86 @@ fun RuleItemCard(
 @Composable
 fun SettingsDialog(
     settingsStorage: SettingsStorage,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onSaveInterval: () -> Unit
 ) {
     val context = LocalContext.current
     var apiKey by remember { mutableStateOf(settingsStorage.getGeminiApiKey()) }
     var selectedModel by remember { mutableStateOf(settingsStorage.getAiModel()) }
     var dropdownExpanded by remember { mutableStateOf(false) }
 
+    var selectedIntervalMins by remember { mutableStateOf(settingsStorage.getTrackerIntervalMinutes()) }
+    var intervalDropdownExpanded by remember { mutableStateOf(false) }
+
     val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
     val isIgnoringBattery = remember { powerManager.isIgnoringBatteryOptimizations(context.packageName) }
     
     val models = listOf("gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro")
+    val intervals = listOf(
+        Pair("15 minutes (Min)", 15),
+        Pair("30 minutes", 30),
+        Pair("1 hour", 60),
+        Pair("6 hours", 360),
+        Pair("12 hours", 720)
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(imageVector = Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(text = "AI Scraper Settings", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(text = "Tracker Settings", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
-                    text = "Provide your Gemini API parameters to unlock real-time intelligence gates and advanced summaries.",
+                    text = "Configure your preferred check interval and optional Gemini API keys for smart monitoring updates.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                // Background check intervals dropdown
+                Column {
+                    Text(
+                        text = "Web Monitor Scan Interval",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        val currentIntervalLabel = intervals.firstOrNull { it.second == selectedIntervalMins }?.first 
+                            ?: "$selectedIntervalMins minutes"
+                        OutlinedTextField(
+                            value = currentIntervalLabel,
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Select Tracking Interval",
+                                    modifier = Modifier.clickable { intervalDropdownExpanded = true }
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth().clickable { intervalDropdownExpanded = true }.testTag("interval_selector_input")
+                        )
+                        DropdownMenu(
+                            expanded = intervalDropdownExpanded,
+                            onDismissRequest = { intervalDropdownExpanded = false }
+                        ) {
+                            intervals.forEach { (label, mins) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        selectedIntervalMins = mins
+                                        intervalDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
                 
                 OutlinedTextField(
                     value = apiKey,
@@ -859,6 +915,8 @@ fun SettingsDialog(
                 onClick = {
                     settingsStorage.saveGeminiApiKey(apiKey)
                     settingsStorage.saveAiModel(selectedModel)
+                    settingsStorage.saveTrackerIntervalMinutes(selectedIntervalMins)
+                    onSaveInterval()
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),

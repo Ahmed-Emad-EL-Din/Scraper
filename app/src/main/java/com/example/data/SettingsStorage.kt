@@ -25,6 +25,8 @@ class SettingsStorage(context: Context) {
     companion object {
         private const val KEY_GEMINI_API_KEY = "gemini_api_key"
         private const val KEY_AI_MODEL = "ai_model"
+        private const val KEY_TRACKER_INTERVAL_MINUTES = "tracker_interval_minutes"
+        private const val KEY_TRACKER_ENABLED = "tracker_enabled"
     }
 
     fun saveGeminiApiKey(apiKey: String) {
@@ -41,5 +43,21 @@ class SettingsStorage(context: Context) {
 
     fun getAiModel(): String {
         return sharedPrefs.getString(KEY_AI_MODEL, "gemini-1.5-flash") ?: "gemini-1.5-flash"
+    }
+
+    fun saveTrackerIntervalMinutes(minutes: Int) {
+        sharedPrefs.edit().putInt(KEY_TRACKER_INTERVAL_MINUTES, minutes).apply()
+    }
+
+    fun getTrackerIntervalMinutes(): Int {
+        return sharedPrefs.getInt(KEY_TRACKER_INTERVAL_MINUTES, 15)
+    }
+
+    fun saveTrackerEnabled(enabled: Boolean) {
+        sharedPrefs.edit().putBoolean(KEY_TRACKER_ENABLED, enabled).apply()
+    }
+
+    fun isTrackerEnabled(): Boolean {
+        return sharedPrefs.getBoolean(KEY_TRACKER_ENABLED, true)
     }
 }

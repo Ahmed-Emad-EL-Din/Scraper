@@ -1,55 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <!-- Browser Outline -->
-    <path
-        android:pathData="M30,26 h48 a4,4 0 0 1 4,4 v38 a4,4 0 0 1 -4,4 h-48 a4,4 0 0 1 -4,-4 v-38 a4,4 0 0 1 4,-4 z"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3.5" />
-
-    <!-- Browser Title Bar Separator Line -->
-    <path
-        android:pathData="M26,38 h56"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5" />
-
-    <!-- Three Browser Window Control Dots -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M32,33 m-1.5,0 a1.5,1.5 0 1 1 3,0 a1.5,1.5 0 1 1 -3,0 M38,33 m-1.5,0 a1.5,1.5 0 1 1 3,0 a1.5,1.5 0 1 1 -3,0 M44,33 m-1.5,0 a1.5,1.5 0 1 1 3,0 a1.5,1.5 0 1 1 -3,0" />
-
-    <!-- Webpage Decorative Dummy Text Rows -->
-    <path
-        android:pathData="M34,48 h22 M34,56 h14 M34,64 h18"
-        android:strokeColor="#FFFFFF"
-        android:strokeLineCap="round"
-        android:strokeWidth="2.5" />
-
-    <!-- White Solid Circle Offset Background for overlapping Target to pop out of the browser border -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M72,68 m-16,0 a16,16 0 1 1 32,0 a16,16 0 1 1 -32,0" />
-
-    <!-- Cyan Target Outer Circle -->
-    <path
-        android:pathData="M72,68 m-11,0 a11,11 0 1 1 22,0 a11,11 0 1 1 -22,0"
-        android:strokeColor="#06B6D4"
-        android:strokeWidth="3.2" />
-
-    <!-- Cyan Target Inner Center Dot -->
-    <path
-        android:fillColor="#06B6D4"
-        android:pathData="M72,68 m-3.5,0 a3.5,3.5 0 1 1 7,0 a3.5,3.5 0 1 1 -3.5,0" />
-
-    <!-- Cyan Target Tick Toggles (Horizontal and Vertical Crosshairs) -->
-    <path
-        android:pathData="M72,51 L72,59 M72,77 L72,85 M55,68 L63,68 M81,68 L89,68"
-        android:strokeColor="#06B6D4"
-        android:strokeLineCap="round"
-        android:strokeWidth="3" />
-
-</vector>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="108dp"
+        android:height="108dp"
+        android:drawable="@drawable/app_icon_cropped"
+        android:gravity="center" />
+</layer-list>

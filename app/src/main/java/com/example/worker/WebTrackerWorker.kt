@@ -9,6 +9,8 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.WorkManager
+import androidx.work.ForegroundInfo
+import android.content.pm.ServiceInfo
 import com.example.BuildConfig
 import com.example.data.AppDatabase
 import com.example.data.CookieStorage
@@ -51,8 +53,46 @@ class WebTrackerWorker(
 
     private val geminiApiService = retrofit.create(GeminiApiService::class.java)
 
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val channelId = "webview_tracker_updates"
+        val notificationId = 8888
+        val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Web Monitor Background Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps Web Monitor running reliably in the background."
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(applicationContext, channelId)
+            .setContentTitle("Web Monitor")
+            .setContentText("Web Monitor is actively checking for updates...")
+            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(notificationId, notification)
+        }
+    }
+
     override suspend fun doWork(): Result {
         Log.d(tag, "Background web scraping check started")
+
+        try {
+            setForeground(getForegroundInfo())
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to start foreground service", e)
+        }
+
         val rules = dao.getAllRulesDirect().filter { !it.isPaused }
         if (rules.isEmpty()) {
             Log.d(tag, "No active tracking rules. Stopping work.")
@@ -62,9 +102,11 @@ class WebTrackerWorker(
         val currentTime = System.currentTimeMillis()
         val rulesByUrl = rules.groupBy { it.url }
 
+        // Setup robust client timeouts (15 seconds) to prevent infinite hangs
         val okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .followRedirects(true)
             .build()
 
@@ -82,6 +124,10 @@ class WebTrackerWorker(
             // Perform single request for this URL to avoid duplicate loads & respect battery / network
             try {
                 Log.d(tag, "Running update checks for URL: $url")
+                
+                // Ensure Jsoup connects include timeout as well if used
+                val jsoupConn = Jsoup.connect(url).timeout(15000)
+
                 val cookies = cookieStorage.getCookies(url)
                 val requestBuilder = Request.Builder()
                     .url(url)
@@ -156,7 +202,11 @@ class WebTrackerWorker(
                         continue
                     }
 
-                    if (newText != rule.lastKnownText) {
+                    // Extract pure plain text from both newText and lastKnownText before comparison
+                    val plainOldText = Jsoup.parse(rule.lastKnownText).text().trim()
+                    val plainNewText = Jsoup.parse(newText).text().trim()
+
+                    if (plainNewText != plainOldText) {
                         try {
                             val historyDao = database.trackingHistoryDao()
                             historyDao.insertHistory(
@@ -171,9 +221,10 @@ class WebTrackerWorker(
                         }
 
                         if (!rule.isPremiumRule) {
-                            // Path A: Standard User
-                            // Inform the user precisely of what changed from what to what.
-                            val changeMsg = findTextDifference(rule.lastKnownText, newText)
+                            // Path A: Standard User (with Readable Old Text to New Text formatting)
+                            val oldPreview = if (plainOldText.length > 80) "${plainOldText.take(77)}..." else plainOldText
+                            val newPreview = if (plainNewText.length > 80) "${plainNewText.take(77)}..." else plainNewText
+                            val changeMsg = "Update: Changed from $oldPreview to $newPreview"
 
                             sendNotifications(
                                 id = rule.id,

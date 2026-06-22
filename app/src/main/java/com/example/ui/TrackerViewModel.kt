@@ -14,6 +14,7 @@ import androidx.work.WorkManager
 import com.example.data.AppDatabase
 import com.example.data.TrackingRule
 import com.example.data.TrackingRuleRepository
+import com.example.data.SettingsStorage
 import com.example.worker.WebTrackerWorker
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -41,21 +42,30 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
         scheduleBackgroundChecks(application)
     }
 
-    private fun scheduleBackgroundChecks(application: Application) {
+    fun scheduleBackgroundChecks(application: Application) {
         try {
             Log.d(tag, "Scheduling background periodic scans with WorkManager...")
+            val settings = SettingsStorage(application)
+            if (!settings.isTrackerEnabled()) {
+                Log.d(tag, "Web tracker is globally disabled. Cancelling work.")
+                WorkManager.getInstance(application).cancelUniqueWork("WebTrackerWorker")
+                return
+            }
+
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            // Run every 15 minutes - the background minimum allowed by WorkManager
-            val workRequest = PeriodicWorkRequestBuilder<WebTrackerWorker>(15, TimeUnit.MINUTES)
+            val intervalMinutes = settings.getTrackerIntervalMinutes()
+            Log.d(tag, "Scheduling WorkManager with current interval: $intervalMinutes minutes")
+
+            val workRequest = PeriodicWorkRequestBuilder<WebTrackerWorker>(intervalMinutes.toLong(), TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build()
 
             WorkManager.getInstance(application).enqueueUniquePeriodicWork(
                 "WebTrackerWorker",
-                ExistingPeriodicWorkPolicy.KEEP, // Retains schedule if already enqueued
+                ExistingPeriodicWorkPolicy.UPDATE, // Updates the schedule with new configurations
                 workRequest
             )
             Log.d(tag, "Successfully secured periodic WorkManager registration")
