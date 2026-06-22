@@ -16,6 +16,9 @@ interface TrackingRuleDao {
     @Query("SELECT * FROM tracking_rules WHERE id = :id LIMIT 1")
     suspend fun getRuleById(id: Int): TrackingRule?
 
+    @Query("SELECT * FROM tracking_rules")
+    suspend fun getAllRulesDirect(): List<TrackingRule>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRule(rule: TrackingRule): Long
 

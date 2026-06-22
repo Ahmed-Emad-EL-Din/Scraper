@@ -10,5 +10,13 @@ data class TrackingRule(
     val cssSelector: String?,
     val lastKnownText: String,
     val isPremiumRule: Boolean,
-    val aiPrompt: String?
+    val aiPrompt: String?,
+    val checkIntervalMinutes: Int = 15,
+    val lastCheckedTimeMillis: Long = 0L,
+    val isTrackWholePage: Boolean = false,
+    val isTrackList: Boolean = false,
+    val aiCondition: String? = null,
+    val previousText: String? = null,
+    val isPaused: Boolean = false,
+    val lastAiSummary: String? = null
 )

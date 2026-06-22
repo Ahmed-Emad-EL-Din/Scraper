@@ -75,6 +75,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.data.CookieStorage
 import com.example.ui.theme.IndigoPrimary
 import com.example.ui.theme.PremiumGold
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.BorderStroke
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -85,10 +88,11 @@ import kotlinx.coroutines.launch
 fun BrowserScreen(
     viewModel: TrackerViewModel,
     onBackToDashboard: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initialUrl: String? = null
 ) {
-    var urlInput by remember { mutableStateOf("https://www.google.com") }
-    var currentUrl by remember { mutableStateOf("https://www.google.com") }
+    var urlInput by remember { mutableStateOf(initialUrl ?: "https://www.google.com") }
+    var currentUrl by remember { mutableStateOf(initialUrl ?: "https://www.google.com") }
     var webView: WebView? by remember { mutableStateOf(null) }
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
@@ -104,12 +108,10 @@ fun BrowserScreen(
     // Tracker setup interactive states
     var isBottomSheetVisible by remember { mutableStateOf(false) }
     var isInspectingMode by remember { mutableStateOf(false) }
-    var isPremiumOptionSelected by remember { mutableStateOf(false) }
     
     // Dialog setups
-    var showFreeConfirmBySelector by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var showPremiumPromptBySelector by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var premiumPromptInput by remember { mutableStateOf("") }
+    var showSetupDialog by remember { mutableStateOf<SetupDialogData?>(null) }
+    var selectedInterval by remember { mutableStateOf(15) }
 
     val sheetState = rememberModalBottomSheetState()
 
@@ -344,17 +346,19 @@ fun BrowserScreen(
                         // Add JS Interface safely named WebViewTrackerBridge
                         addJavascriptInterface(object : Any() {
                             @JavascriptInterface
-                            fun onElementSelected(cssPath: String, text: String) {
+                            fun onElementSelected(cssPath: String, genericPath: String, text: String) {
                                 scope.launch(Dispatchers.Main) {
                                     if (isInspectingMode) {
                                         isInspectingMode = false
                                         webView?.evaluateJavascript("if (window.removeTrackerInspector) { window.removeTrackerInspector(); }", null)
                                         
-                                        if (isPremiumOptionSelected) {
-                                            showPremiumPromptBySelector = Pair(cssPath, text)
-                                        } else {
-                                            showFreeConfirmBySelector = Pair(cssPath, text)
-                                        }
+                                        selectedInterval = 15
+                                        showSetupDialog = SetupDialogData(
+                                            uniqueSelector = cssPath,
+                                            genericSelector = genericPath,
+                                            textPreview = text,
+                                            isWholePage = false
+                                        )
                                     }
                                 }
                             }
@@ -416,18 +420,21 @@ fun BrowserScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
-                    // Option 1 (Free)
+                    // Option 1: Whole Webpage Tracker
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 8.dp)
                             .clickable {
                                 isBottomSheetVisible = false
-                                isInspectingMode = true
-                                isPremiumOptionSelected = false
-                                webView?.let { injectInspectorScript(it) }
+                                showSetupDialog = SetupDialogData(
+                                    uniqueSelector = null,
+                                    genericSelector = null,
+                                    textPreview = "Whole Webpage Code",
+                                    isWholePage = true
+                                )
                             }
-                            .testTag("free_track_option"),
+                            .testTag("whole_page_track_option"),
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
@@ -439,20 +446,20 @@ fun BrowserScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Standard Eye Icon",
+                                contentDescription = "Whole Page Icon",
                                 tint = IndigoPrimary,
                                 modifier = Modifier.size(28.dp)
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column {
                                 Text(
-                                    text = "Standard Tracker",
+                                    text = "Whole Webpage Tracker",
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Notify on any change",
+                                    text = "Track the entire webpage code. Notify me if any HTML changes.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -460,7 +467,7 @@ fun BrowserScreen(
                         }
                     }
 
-                    // Option 2 (Premium)
+                    // Option 2: Specific Elements Tracker
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -468,10 +475,9 @@ fun BrowserScreen(
                             .clickable {
                                 isBottomSheetVisible = false
                                 isInspectingMode = true
-                                isPremiumOptionSelected = true
                                 webView?.let { injectInspectorScript(it) }
                             }
-                            .testTag("premium_track_option"),
+                            .testTag("element_track_option"),
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
@@ -483,20 +489,20 @@ fun BrowserScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Star,
-                                contentDescription = "Premium Gold Icon",
+                                contentDescription = "Specific Element Icon",
                                 tint = PremiumGold,
                                 modifier = Modifier.size(28.dp)
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column {
                                 Text(
-                                    text = "Smart AI Tracker",
+                                    text = "Specific Elements Tracker",
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Set conditions & get summaries",
+                                    text = "Select specific elements on the screen to track.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -508,117 +514,199 @@ fun BrowserScreen(
             }
         }
 
-        // CONFIRM DIALOG FOR FREE OPTION
-        showFreeConfirmBySelector?.let { selected ->
-            val cssPath = selected.first
-            val text = selected.second
+        // UNIFIED SETUP DIALOG
+        showSetupDialog?.let { setupData ->
+            var trackModeByList by remember { mutableStateOf(false) } // false = exact unique, true = generic list
+            var isPremiumFilterActive by remember { mutableStateOf(false) }
+            var aiConditionPromptInput by remember { mutableStateOf("") }
+            
             AlertDialog(
-                onDismissRequest = { showFreeConfirmBySelector = null },
-                title = { Text("Confirm Standard Tracker") },
-                text = {
-                    Column {
-                        Text("Do you want to track this element?")
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Value: $text",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Selector: $cssPath",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                        onClick = {
-                            viewModel.addRule(
-                                url = currentUrl,
-                                cssSelector = cssPath,
-                                isPremium = false,
-                                aiPrompt = null
-                            )
-                            showFreeConfirmBySelector = null
-                            Toast.makeText(context, "Tracker added!", Toast.LENGTH_SHORT).show()
-                            onBackToDashboard()
-                        }
-                    ) {
-                        Text("Add Tracker")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showFreeConfirmBySelector = null }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
-        // CONFIRM DIALOG FOR PREMIUM OPTION
-        showPremiumPromptBySelector?.let { selected ->
-            val cssPath = selected.first
-            val text = selected.second
-            AlertDialog(
-                onDismissRequest = { showPremiumPromptBySelector = null },
+                onDismissRequest = { showSetupDialog = null },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(imageVector = Icons.Default.Star, contentDescription = null, tint = PremiumGold)
+                        Icon(
+                            imageVector = if (isPremiumFilterActive) Icons.Default.Star else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (isPremiumFilterActive) PremiumGold else IndigoPrimary
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("AI Rules Setup")
+                        Text(
+                            text = if (setupData.isWholePage) "Whole Webpage Configuration" else "Scraper Rule Configuration",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
                     }
                 },
                 text = {
-                    Column {
-                        Text("Enter the AI condition rule to summarize this element:")
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = premiumPromptInput,
-                            onValueChange = { premiumPromptInput = it },
-                            placeholder = { Text("e.g., Notify me if the price goes above 1000") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("premium_condition_input"),
-                            singleLine = false,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = PremiumGold,
-                                focusedLabelColor = PremiumGold
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Text(
-                            text = "Selected text value: $text",
+                            text = "Configure parameters to secure background HTML scrape checks and alerting rules.",
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // 1. Text preview
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "Preview Extracted Text",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = setupData.textPreview,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        // 2. Select specific vs list (only if not whole page)
+                        if (!setupData.isWholePage) {
+                            Column {
+                                Text(
+                                    text = "Tracking Strategy",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    // Card A: Specific Unique
+                                    Card(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { trackModeByList = false }
+                                            .testTag("track_specific_btn"),
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (!trackModeByList) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
+                                        ),
+                                        border = BorderStroke(
+                                            width = if (!trackModeByList) 2.dp else 1.dp,
+                                            color = if (!trackModeByList) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                        )
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text("Specific Item", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text("Watch only this unique element", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+
+                                    // Card B: List Siblings
+                                    Card(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { trackModeByList = true }
+                                            .testTag("track_list_btn"),
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (trackModeByList) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
+                                        ),
+                                        border = BorderStroke(
+                                            width = if (trackModeByList) 2.dp else 1.dp,
+                                            color = if (trackModeByList) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                        )
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text("Class Group List", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text("Watch all similar elements", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Premium AI Toggle
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isPremiumFilterActive) PremiumGold.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surface
+                            ),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isPremiumFilterActive) PremiumGold else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(imageVector = Icons.Default.Star, contentDescription = null, tint = PremiumGold)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Smart AI Filter Gate", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                    Switch(
+                                        checked = isPremiumFilterActive,
+                                        onCheckedChange = { isPremiumFilterActive = it },
+                                        modifier = Modifier.testTag("premium_switch")
+                                    )
+                                }
+                                if (isPremiumFilterActive) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = aiConditionPromptInput,
+                                        onValueChange = { aiConditionPromptInput = it },
+                                        placeholder = { Text("e.g. Notify me only if the price is higher than 300") },
+                                        singleLine = false,
+                                        maxLines = 2,
+                                        modifier = Modifier.fillMaxWidth().testTag("ai_condition_prompt_input")
+                                    )
+                                }
+                            }
+                        }
+
+                        // 4. Frequency Selector
+                        FrequencySelector(
+                            selectedMinutes = selectedInterval,
+                            onMinutesSelected = { selectedInterval = it }
                         )
                     }
                 },
                 confirmButton = {
                     Button(
-                        colors = ButtonDefaults.buttonColors(containerColor = PremiumGold),
+                        modifier = Modifier.testTag("confirm_add_rule_btn"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isPremiumFilterActive) PremiumGold else MaterialTheme.colorScheme.primary
+                        ),
                         onClick = {
                             viewModel.addRule(
                                 url = currentUrl,
-                                cssSelector = cssPath,
-                                isPremium = true,
-                                aiPrompt = premiumPromptInput
+                                cssSelector = if (setupData.isWholePage) null else (if (trackModeByList) setupData.genericSelector else setupData.uniqueSelector),
+                                isPremium = isPremiumFilterActive,
+                                aiPrompt = if (isPremiumFilterActive) aiConditionPromptInput else null,
+                                checkIntervalMinutes = selectedInterval,
+                                isTrackWholePage = setupData.isWholePage,
+                                isTrackList = if (setupData.isWholePage) false else trackModeByList,
+                                aiCondition = if (isPremiumFilterActive) aiConditionPromptInput else null
                             )
-                            showPremiumPromptBySelector = null
-                            premiumPromptInput = ""
-                            Toast.makeText(context, "Smart Premium Tracker added!", Toast.LENGTH_SHORT).show()
+                            showSetupDialog = null
+                            Toast.makeText(context, "Tracker added successfully!", Toast.LENGTH_SHORT).show()
                             onBackToDashboard()
                         }
                     ) {
-                        Text("Save Smart Tracker")
+                        Text("Add Tracker Rule")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showPremiumPromptBySelector = null }) {
+                    TextButton(
+                        modifier = Modifier.testTag("dismiss_dialog_btn"),
+                        onClick = { showSetupDialog = null }
+                    ) {
                         Text("Cancel")
                     }
                 }
@@ -666,7 +754,36 @@ private fun injectInspectorScript(webView: WebView) {
                 return path.join(" > ");
             }
 
-            function handleClick(e) {
+            function getGenericSelector(el) {
+                if (!(el instanceof Element)) return "";
+                let selector = "";
+                if (el.className && typeof el.className === 'string') {
+                    const classes = el.className.split(/\s+/).filter(c => c.trim().length > 0 && c.indexOf(':') === -1 && c.indexOf('{') === -1);
+                    if (classes.length > 0) {
+                        selector = "." + classes.join(".");
+                    }
+                }
+                if (!selector) {
+                    selector = el.nodeName.toLowerCase();
+                }
+                const parent = el.parentNode;
+                if (parent && parent instanceof Element) {
+                    let parentSel = "";
+                    if (parent.className && typeof parent.className === 'string') {
+                        const parentClasses = parent.className.split(/\s+/).filter(c => c.trim().length > 0 && c.indexOf(':') === -1);
+                        if (parentClasses.length > 0) {
+                            parentSel = "." + parentClasses.join(".");
+                        }
+                    }
+                    if (!parentSel) {
+                        parentSel = parent.nodeName.toLowerCase();
+                    }
+                    return parentSel + " > " + selector;
+                }
+                return selector;
+            }
+
+            function handleInteract(e) {
                 e.preventDefault();
                 e.stopPropagation();
 
@@ -680,32 +797,85 @@ private fun injectInspectorScript(webView: WebView) {
                 originalBorder = el.style.border;
                 originalBackground = el.style.backgroundColor;
 
-                // Visual target outline styling: 3px dashed #14B8A6 border with a 10% opacity fill (rgba(20, 184, 166, 0.1))
+                // Visual target outline styling: 3px dashed #14B8A6 border with 10% opacity fill
                 el.style.border = "3px dashed #14B8A6";
                 el.style.backgroundColor = "rgba(20, 184, 166, 0.1)";
 
                 const cssPath = getCssSelector(el);
+                const genericPath = getGenericSelector(el);
                 const text = el.innerText || el.textContent || "";
                 
-                // Invoke Android Native Bridge Callback
                 if (window.WebViewTrackerBridge) {
-                    window.WebViewTrackerBridge.onElementSelected(cssPath, text);
+                    window.WebViewTrackerBridge.onElementSelected(cssPath, genericPath, text);
                 }
             }
 
-            document.addEventListener("click", handleClick, { capture: true });
+            document.addEventListener("click", handleInteract, { capture: true });
+            document.addEventListener("touchstart", handleInteract, { capture: true });
             
             window.removeTrackerInspector = function() {
                 if (selectedElement) {
                     selectedElement.style.border = originalBorder;
                     selectedElement.style.backgroundColor = originalBackground;
                 }
-                document.removeEventListener("click", handleClick, { capture: true });
+                document.removeEventListener("click", handleInteract, { capture: true });
+                document.removeEventListener("touchstart", handleInteract, { capture: true });
                 window.hasTrackerInspector = false;
             };
         })();
     """.trimIndent()
     webView.evaluateJavascript(jsCode, null)
+}
+
+@Composable
+fun FrequencySelector(
+    selectedMinutes: Int,
+    onMinutesSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val options = listOf(
+        Pair("15m", 15),
+        Pair("30m", 30),
+        Pair("1h", 60),
+        Pair("4h", 240),
+        Pair("12h", 720),
+        Pair("24h", 1440)
+    )
+    Column(modifier = modifier) {
+        Text(
+            text = "Check Frequency",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            options.forEach { (label, minutes) ->
+                val isSelected = selectedMinutes == minutes
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .clickable { onMinutesSelected(minutes) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
 }
 
 private fun formatUrl(input: String): String {
@@ -715,3 +885,10 @@ private fun formatUrl(input: String): String {
     }
     return "https://$clean"
 }
+
+data class SetupDialogData(
+    val uniqueSelector: String?,
+    val genericSelector: String?,
+    val textPreview: String,
+    val isWholePage: Boolean = false
+)

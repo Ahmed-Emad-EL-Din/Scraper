@@ -90,6 +90,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.work.runtime)
   implementation(libs.androidx.security.crypto)
   implementation(libs.jsoup)
   // implementation(libs.coil.compose)

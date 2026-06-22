@@ -1,0 +1,45 @@
+package com.example.data
+
+import android.content.Context
+import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
+
+class SettingsStorage(context: Context) {
+    private val tag = "SettingsStorage"
+
+    private val sharedPrefs = try {
+        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+        EncryptedSharedPreferences.create(
+            "secure_settings",
+            masterKeyAlias,
+            context,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    } catch (e: Exception) {
+        Log.e(tag, "Failed to initialize EncryptedSharedPreferences, falling back to standard private preferences", e)
+        context.getSharedPreferences("secure_settings_fallback", Context.MODE_PRIVATE)
+    }
+
+    companion object {
+        private const val KEY_GEMINI_API_KEY = "gemini_api_key"
+        private const val KEY_AI_MODEL = "ai_model"
+    }
+
+    fun saveGeminiApiKey(apiKey: String) {
+        sharedPrefs.edit().putString(KEY_GEMINI_API_KEY, apiKey).apply()
+    }
+
+    fun getGeminiApiKey(): String {
+        return sharedPrefs.getString(KEY_GEMINI_API_KEY, "") ?: ""
+    }
+
+    fun saveAiModel(model: String) {
+        sharedPrefs.edit().putString(KEY_AI_MODEL, model).apply()
+    }
+
+    fun getAiModel(): String {
+        return sharedPrefs.getString(KEY_AI_MODEL, "gemini-1.5-flash") ?: "gemini-1.5-flash"
+    }
+}
