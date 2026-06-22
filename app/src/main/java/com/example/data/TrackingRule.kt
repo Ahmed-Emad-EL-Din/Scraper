@@ -18,5 +18,6 @@ data class TrackingRule(
     val aiCondition: String? = null,
     val previousText: String? = null,
     val isPaused: Boolean = false,
-    val lastAiSummary: String? = null
+    val lastAiSummary: String? = null,
+    val isStealthMode: Boolean = false
 )

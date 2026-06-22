@@ -537,6 +537,7 @@ fun BrowserScreen(
             var trackModeByList by remember { mutableStateOf(false) } // false = exact unique, true = generic list
             var isPremiumFilterActive by remember { mutableStateOf(false) }
             var aiConditionPromptInput by remember { mutableStateOf("") }
+            var useStealthMode by remember { mutableStateOf(false) }
             
             AlertDialog(
                 onDismissRequest = { showSetupDialog = null },
@@ -688,6 +689,54 @@ fun BrowserScreen(
                             }
                         }
 
+                        // 3.5. Stealth Mode Toggle Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth().testTag("stealth_mode_card"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (useStealthMode) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface
+                            ),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (useStealthMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = "Use Stealth Mode",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Bypass strict bot protection using headless browser",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Switch(
+                                        checked = useStealthMode,
+                                        onCheckedChange = { useStealthMode = it },
+                                        modifier = Modifier.testTag("stealth_mode_switch")
+                                    )
+                                }
+                            }
+                        }
+
                         // 4. Frequency Selector
                         FrequencySelector(
                             selectedMinutes = selectedInterval,
@@ -711,7 +760,8 @@ fun BrowserScreen(
                                 isTrackWholePage = setupData.isWholePage,
                                 isTrackList = if (setupData.isWholePage) false else trackModeByList,
                                 aiCondition = if (isPremiumFilterActive) aiConditionPromptInput else null,
-                                initialText = setupData.textPreview
+                                initialText = setupData.textPreview,
+                                isStealthMode = useStealthMode
                             )
                             showSetupDialog = null
                             Toast.makeText(context, "Tracker added successfully!", Toast.LENGTH_SHORT).show()

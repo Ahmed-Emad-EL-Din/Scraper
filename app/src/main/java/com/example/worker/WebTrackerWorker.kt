@@ -30,6 +30,13 @@ import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 import com.example.MainActivity
 import com.example.data.SettingsStorage
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.CookieManager
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 class WebTrackerWorker(
     appContext: Context,
@@ -134,24 +141,84 @@ class WebTrackerWorker(
                 // Ensure Jsoup connects include timeout as well if used
                 val jsoupConn = Jsoup.connect(url).timeout(15000)
 
-                val requestBuilder = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", activeUserAgent)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-                    .header("Accept-Language", "en-US,en;q=0.9")
-                    .header("Accept-Encoding", "gzip, deflate, br")
-                    .header("Upgrade-Insecure-Requests", "1")
-                    .header("Sec-Fetch-Dest", "document")
-                    .header("Sec-Fetch-Mode", "navigate")
-                    .header("Sec-Fetch-Site", "none")
-                    .header("Sec-Fetch-User", "?1")
+                val urlHasStealthMode = dueRules.any { it.isStealthMode }
+                var htmlContent = ""
+                var isFallbackUsed = false
+                var finalUrl = url
+                var responseCode = 200
 
-                val response = okHttpClient.newCall(requestBuilder.build()).execute()
+                if (urlHasStealthMode) {
+                    Log.d(tag, "URL has Stealth Mode enabled. Skipping OkHttp and using Headless WebView directly for: $url")
+                    try {
+                        htmlContent = fetchHtmlWithHiddenWebView(applicationContext, url)
+                        isFallbackUsed = true
+                        finalUrl = url
+                        responseCode = 200
+                    } catch (e: Exception) {
+                        Log.e(tag, "Headless WebView failed for Stealth Mode URL: $url", e)
+                        throw e
+                    }
+                } else {
+                    // Try OkHttp first
+                    var okHttpResponse: okhttp3.Response? = null
+                    try {
+                        val requestBuilder = Request.Builder()
+                            .url(url)
+                            .header("User-Agent", activeUserAgent)
+                            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                            .header("Accept-Language", "en-US,en;q=0.9")
+                            .header("Accept-Encoding", "gzip, deflate, br")
+                            .header("Upgrade-Insecure-Requests", "1")
+                            .header("Sec-Fetch-Dest", "document")
+                            .header("Sec-Fetch-Mode", "navigate")
+                            .header("Sec-Fetch-Site", "none")
+                            .header("Sec-Fetch-User", "?1")
 
-                // Session Expiry Handling & Scraping Logic
-                val finalUrl = response.request.url.toString()
-                val responseBodyText = response.body?.string() ?: ""
-                val document = Jsoup.parse(responseBodyText)
+                        val response = okHttpClient.newCall(requestBuilder.build()).execute()
+                        okHttpResponse = response
+                        finalUrl = response.request.url.toString()
+                        responseCode = response.code
+                        val responseBodyText = response.body?.string() ?: ""
+
+                        val isResponseOkHttpFailure = response.code == 409 || response.code == 403
+                        val refreshLoopReason = isRefreshLoopOrRedirect(responseBodyText)
+
+                        if (isResponseOkHttpFailure || refreshLoopReason != null) {
+                            val msg = refreshLoopReason ?: "HTTP error code ${response.code}"
+                            Log.d(tag, "Bypass trigger: $msg. Activating Headless WebView Fallback for URL: $url")
+                            try {
+                                htmlContent = fetchHtmlWithHiddenWebView(applicationContext, url)
+                                isFallbackUsed = true
+                                finalUrl = url
+                                responseCode = 200
+                            } catch (fallbackEx: Exception) {
+                                Log.e(tag, "Headless WebView Fallback failed for URL: $url", fallbackEx)
+                                htmlContent = responseBodyText
+                            }
+                        } else {
+                            htmlContent = responseBodyText
+                        }
+                    } catch (okhttpEx: Exception) {
+                        Log.e(tag, "OkHttp network call failed for URL: $url. Retrying via Headless WebView Fallback.", okhttpEx)
+                        try {
+                            htmlContent = fetchHtmlWithHiddenWebView(applicationContext, url)
+                            isFallbackUsed = true
+                            finalUrl = url
+                            responseCode = 200
+                        } catch (fallbackEx: Exception) {
+                            Log.e(tag, "Headless WebView Fallback retry also failed for URL: $url", fallbackEx)
+                            throw okhttpEx
+                        }
+                    } finally {
+                        try {
+                            okHttpResponse?.close()
+                        } catch (e: Exception) {
+                            // ignore
+                        }
+                    }
+                }
+
+                val document = Jsoup.parse(htmlContent)
 
                 for (rule in dueRules) {
                     val wasRedirectedToLogin = if (url.contains("/login", ignoreCase = true) || url.contains("/signin", ignoreCase = true)) {
@@ -166,10 +233,11 @@ class WebTrackerWorker(
                         isFinalUrlLogin && !hasSelector
                     }
 
-                    val isSessionExpired = response.code == 401 || response.code == 403 || response.code == 419 || wasRedirectedToLogin || (
+                    val rCode = if (isFallbackUsed) 200 else responseCode
+                    val isSessionExpired = rCode == 401 || rCode == 419 || wasRedirectedToLogin || (
                         !rule.isTrackWholePage && !rule.cssSelector.isNullOrBlank() && 
                         document.select(rule.cssSelector).isEmpty() && 
-                        (responseBodyText.contains("type=\"password\"", ignoreCase = true) || responseBodyText.contains("name=\"password\"", ignoreCase = true))
+                        (htmlContent.contains("type=\"password\"", ignoreCase = true) || htmlContent.contains("name=\"password\"", ignoreCase = true))
                     )
 
                     if (isSessionExpired) {
@@ -189,12 +257,13 @@ class WebTrackerWorker(
                         continue
                     }
 
-                    if (!response.isSuccessful) {
-                        Log.e(tag, "Scraping failed with non-200 code: ${response.code}")
+                    val isSuccessfulLoad = if (isFallbackUsed) htmlContent.isNotEmpty() else (rCode in 200..299)
+                    if (!isSuccessfulLoad) {
+                        Log.e(tag, "Scraping failed with non-200 code: $rCode")
                         dao.updateRule(
                             rule.copy(
                                 lastCheckedTimeMillis = currentTime,
-                                lastKnownText = "Error: Server returned code ${response.code}"
+                                lastKnownText = "Error: Server returned code $rCode"
                             )
                         )
                         continue
@@ -425,6 +494,173 @@ class WebTrackerWorker(
             .setDefaults(NotificationCompat.DEFAULT_ALL)
 
         notificationManager.notify(id, builder.build())
+    }
+
+    private fun isRefreshLoopOrRedirect(html: String): String? {
+        val lower = html.lowercase()
+        if (lower.contains("http-equiv=\"refresh\"") || lower.contains("http-equiv='refresh'")) {
+            return "Meta-Refresh tag found"
+        }
+        val metaRefreshPattern = Regex("<meta\\s+[^>]*http-equiv\\s*=\\s*[\"']?refresh[\"']?[^>]*>", RegexOption.IGNORE_CASE)
+        if (metaRefreshPattern.containsMatchIn(html)) {
+            return "Regex Meta-Refresh tag found"
+        }
+        if (lower.contains("window.location.") || lower.contains("location.replace(") || lower.contains("location.href=")) {
+            return "Javascript location redirect script found"
+        }
+        return null
+    }
+
+    private fun unescapeJson(jsonStr: String): String {
+        if (!jsonStr.startsWith("\"") || !jsonStr.endsWith("\"")) {
+            return jsonStr
+        }
+        val sb = java.lang.StringBuilder()
+        var i = 1
+        val len = jsonStr.length - 1
+        while (i < len) {
+            val c = jsonStr[i]
+            if (c == '\\') {
+                i++
+                if (i < len) {
+                    val next = jsonStr[i]
+                    when (next) {
+                        'n' -> sb.append('\n')
+                        'r' -> sb.append('\r')
+                        't' -> sb.append('\t')
+                        'b' -> sb.append('\b')
+                        'f' -> sb.append('\u000C')
+                        '"' -> sb.append('"')
+                        '\\' -> sb.append('\\')
+                        '/' -> sb.append('/')
+                        'u' -> {
+                            if (i + 4 < len) {
+                                val hexVal = jsonStr.substring(i + 1, i + 5)
+                                try {
+                                    val codeHex = hexVal.toInt(16)
+                                    sb.append(codeHex.toChar())
+                                } catch (e: Exception) {
+                                    sb.append("\\u").append(hexVal)
+                                }
+                                i += 4
+                            } else {
+                                sb.append("\\u")
+                            }
+                        }
+                        else -> sb.append(next)
+                    }
+                }
+            } else {
+                sb.append(c)
+            }
+            i++
+        }
+        return sb.toString()
+    }
+
+    private suspend fun fetchHtmlWithHiddenWebView(context: Context, url: String): String = withContext(Dispatchers.Main) {
+        val deferred = CompletableDeferred<String>()
+        
+        val webView = WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.databaseEnabled = true
+            val storedUa = SettingsStorage(context).getUserAgent()
+            settings.userAgentString = storedUa
+        }
+        
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptCookie(true)
+        cookieManager.setAcceptThirdPartyCookies(webView, true)
+        
+        try {
+            val savedCookieString = cookieManager.getCookie(url)
+            if (!savedCookieString.isNullOrBlank()) {
+                cookieManager.setCookie(url, savedCookieString)
+            } else {
+                val helperJar = com.example.data.PersistentCookieJar(context)
+                val hUrl = url.toHttpUrlOrNull()
+                if (hUrl != null) {
+                    val cookiesList = helperJar.loadForRequest(hUrl)
+                    for (cookie in cookiesList) {
+                        cookieManager.setCookie(url, cookie.toString())
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to restore cookies for headless load", e)
+        }
+        cookieManager.flush()
+        
+        var settlementTimer: java.util.Timer? = null
+        
+        val checkPageAction = Runnable {
+            webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
+                var cleanHtml = html ?: ""
+                cleanHtml = unescapeJson(cleanHtml)
+                Log.d(tag, "Headless WebView fully settled. Extracted HTML length: ${cleanHtml.length}")
+                if (!deferred.isCompleted) {
+                    deferred.complete(cleanHtml)
+                }
+            }
+        }
+        
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, finishedUrl: String?) {
+                super.onPageFinished(view, finishedUrl)
+                Log.d(tag, "onPageFinished triggered for: $finishedUrl")
+                
+                 settlementTimer?.cancel()
+                settlementTimer = java.util.Timer().apply {
+                    schedule(object : java.util.TimerTask() {
+                        override fun run() {
+                            webView.post {
+                                checkPageAction.run()
+                            }
+                        }
+                    }, 5000)
+                }
+            }
+            
+            override fun onReceivedError(
+                view: WebView?,
+                errorCode: Int,
+                description: String?,
+                failingUrl: String?
+            ) {
+                super.onReceivedError(view, errorCode, description, failingUrl)
+                Log.e(tag, "Headless WebView error: Code $errorCode, $description")
+            }
+        }
+        
+        Log.d(tag, "Loading page in headless WebView: $url")
+        webView.loadUrl(url)
+        
+        val timeoutTimer = java.util.Timer().apply {
+            schedule(object : java.util.TimerTask() {
+                override fun run() {
+                    if (!deferred.isCompleted) {
+                        Log.w(tag, "Headless WebView loading timeout exceeded. Resolving with current capture.")
+                        webView.post {
+                            webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
+                                var cleanHtml = html ?: ""
+                                cleanHtml = unescapeJson(cleanHtml)
+                                deferred.complete(cleanHtml)
+                            }
+                        }
+                    }
+                }
+            }, 25000)
+        }
+        
+        val htmlResult = deferred.await()
+        timeoutTimer.cancel()
+        settlementTimer?.cancel()
+        
+        webView.stopLoading()
+        webView.destroy()
+        
+        htmlResult
     }
 
     private fun cleanUrlForDisplay(url: String): String {

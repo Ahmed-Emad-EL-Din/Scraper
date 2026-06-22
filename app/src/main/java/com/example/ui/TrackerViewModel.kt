@@ -157,7 +157,8 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
         isTrackWholePage: Boolean = false,
         isTrackList: Boolean = false,
         aiCondition: String? = null,
-        initialText: String = "Waiting for check"
+        initialText: String = "Waiting for check",
+        isStealthMode: Boolean = false
     ) {
         viewModelScope.launch {
             repository.insertRule(
@@ -170,7 +171,8 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
                     checkIntervalMinutes = checkIntervalMinutes,
                     isTrackWholePage = isTrackWholePage,
                     isTrackList = isTrackList,
-                    aiCondition = aiCondition
+                    aiCondition = aiCondition,
+                    isStealthMode = isStealthMode
                 )
             )
             // Re-schedule just in case WorkManager was paused due to a prior Session Expired event.
