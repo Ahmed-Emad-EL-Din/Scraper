@@ -146,6 +146,7 @@ class WebTrackerWorker(
                 var isFallbackUsed = false
                 var finalUrl = url
                 var responseCode = 200
+                var csrfToken: String? = null
 
                 if (urlHasStealthMode) {
                     Log.d(tag, "URL has Stealth Mode enabled. Skipping OkHttp and using Headless WebView directly for: $url")
@@ -180,7 +181,7 @@ class WebTrackerWorker(
                         responseCode = response.code
                         val responseBodyText = response.body?.string() ?: ""
 
-                        val isResponseOkHttpFailure = response.code == 409 || response.code == 403
+                        val isResponseOkHttpFailure = response.code == 409 || response.code == 403 || response.code == 419
                         val refreshLoopReason = isRefreshLoopOrRedirect(responseBodyText)
 
                         if (isResponseOkHttpFailure || refreshLoopReason != null) {
@@ -215,6 +216,110 @@ class WebTrackerWorker(
                         } catch (e: Exception) {
                             // ignore
                         }
+                    }
+                }
+
+                // Dynamic CSRF Token Extraction:
+                // Extract any standard meta tags CSRF token if visible on first page load
+                csrfToken = extractCsrfToken(htmlContent)
+
+                // Watch for HTTP 419 (Page Expired) error
+                if (responseCode == 419) {
+                    var recoveryAttempts = 0
+                    val maxRecoveryAttempts = 2
+                    var recoverySuccess = false
+
+                    while (responseCode == 419 && recoveryAttempts < maxRecoveryAttempts) {
+                        recoveryAttempts++
+                        Log.w(tag, "HTTP 419 Page Expired detected. Triggering automated session recovery attempt $recoveryAttempts/$maxRecoveryAttempts via Headless WebView...")
+
+                        try {
+                            val recoveredHtml = fetchHtmlWithHiddenWebView(applicationContext, url)
+
+                            // Extract new cookies using CookieManager
+                            val systemCookieManager = android.webkit.CookieManager.getInstance()
+                            val rawCookies = systemCookieManager.getCookie(url)
+
+                            if (!rawCookies.isNullOrBlank()) {
+                                Log.d(tag, "Flashed session cookies retrieved from re-auth: $rawCookies")
+                                // Save new cookies back to EncryptedSharedPreferences (CookieStorage)
+                                com.example.data.CookieStorage(applicationContext).saveCookies(url, rawCookies)
+                                // Save new cookies to Room DB
+                                com.example.data.PersistentCookieJar.saveWebViewCookiesToDb(applicationContext, url, rawCookies)
+                            }
+
+                            // Extract CSRF token from the freshly navigated page
+                            csrfToken = extractCsrfToken(recoveredHtml)
+
+                            // Retry original OkHttp request
+                            Log.d(tag, "Retrying original OkHttp request with freshly negotiated cookies ...")
+                            var okHttpRetryResponse: okhttp3.Response? = null
+                            try {
+                                val retryRequestBuilder = Request.Builder()
+                                    .url(url)
+                                    .header("User-Agent", activeUserAgent)
+                                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                                    .header("Accept-Language", "en-US,en;q=0.9")
+                                    .header("Accept-Encoding", "gzip, deflate, br")
+                                    .header("Upgrade-Insecure-Requests", "1")
+
+                                if (csrfToken != null) {
+                                    retryRequestBuilder.header("X-CSRF-TOKEN", csrfToken)
+                                    Log.d(tag, "Appended X-CSRF-TOKEN to retry headers: $csrfToken")
+                                }
+
+                                val retryClient = okHttpClient.newBuilder()
+                                    .cookieJar(com.example.data.PersistentCookieJar(applicationContext))
+                                    .build()
+
+                                val retryResponse = retryClient.newCall(retryRequestBuilder.build()).execute()
+                                okHttpRetryResponse = retryResponse
+
+                                responseCode = retryResponse.code
+                                finalUrl = retryResponse.request.url.toString()
+                                val retryBody = retryResponse.body?.string() ?: ""
+
+                                if (responseCode != 419) {
+                                    htmlContent = retryBody
+                                    isFallbackUsed = false
+                                    recoverySuccess = true
+                                    Log.d(tag, "Automated session recovery succeeded on attempt $recoveryAttempts! Response code: $responseCode")
+                                    break
+                                }
+                            } catch (retryEx: Exception) {
+                                Log.e(tag, "OkHttp retry call failed during session recovery", retryEx)
+                                // Fallback directly to the recovered HTML content
+                                htmlContent = recoveredHtml
+                                isFallbackUsed = true
+                                responseCode = 200
+                                recoverySuccess = true
+                                break
+                            } finally {
+                                try {
+                                    okHttpRetryResponse?.close()
+                                } catch (e: Exception) {}
+                            }
+                        } catch (recoveryEx: Exception) {
+                            Log.e(tag, "Headless WebView Fallback re-auth failed on attempt $recoveryAttempts", recoveryEx)
+                        }
+                    }
+
+                    if (responseCode == 419 && !recoverySuccess) {
+                        Log.e(tag, "Session expired completely. Fail-safe triggered after $maxRecoveryAttempts attempts.")
+                        
+                        // Pause the rules for this URL in Room DB
+                        for (rule in dueRules) {
+                            dao.updateRule(rule.copy(isPaused = true, lastKnownText = "Session Expired (HTTP 419)"))
+                        }
+
+                        // Fire a localized, user-friendly notification
+                        val displayUrl = cleanUrlForDisplay(url)
+                        sendNotifications(
+                            id = 419000 + url.hashCode(),
+                            title = "Session Expired",
+                            message = "Please open the app and log in to $displayUrl to resume background tracking."
+                        )
+                        continue // Skip checking and processing further rules for this URL in this iteration
                     }
                 }
 
@@ -661,6 +766,23 @@ class WebTrackerWorker(
         webView.destroy()
         
         htmlResult
+    }
+
+    private fun extractCsrfToken(html: String): String? {
+        try {
+            val doc = org.jsoup.Jsoup.parse(html)
+            val metaElement = doc.select("meta[name=csrf-token]").first()
+            if (metaElement != null) {
+                val token = metaElement.attr("content")
+                if (token.isNotEmpty()) {
+                    Log.d(tag, "Found CSRF token in HTML meta tag: $token")
+                    return token
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Error extracting CSRF token", e)
+        }
+        return null
     }
 
     private fun cleanUrlForDisplay(url: String): String {
