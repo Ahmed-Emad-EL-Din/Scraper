@@ -41,6 +41,11 @@
         </receiver>
 
         <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <service
             android:name=".worker.WebMonitorTileService"
             android:label="Web Monitor"
             android:icon="@android:drawable/ic_popup_reminder"

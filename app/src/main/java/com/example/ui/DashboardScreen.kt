@@ -77,6 +77,10 @@ import com.example.data.SettingsStorage
 import com.example.data.TrackingRule
 import com.example.ui.theme.IndigoPrimary
 import com.example.ui.theme.PremiumGold
+import androidx.compose.material3.Switch
+import android.content.ComponentName
+import android.service.quicksettings.TileService
+import com.example.worker.WebMonitorTileService
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -608,6 +612,7 @@ fun SettingsDialog(
 
     var selectedIntervalMins by remember { mutableStateOf(settingsStorage.getTrackerIntervalMinutes()) }
     var intervalDropdownExpanded by remember { mutableStateOf(false) }
+    var isTrackerEnabled by remember { mutableStateOf(settingsStorage.isTrackerEnabled()) }
 
     val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
     val isIgnoringBattery = remember { powerManager.isIgnoringBatteryOptimizations(context.packageName) }
@@ -636,6 +641,35 @@ fun SettingsDialog(
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                // Global tracker enablement switch
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { isTrackerEnabled = !isTrackerEnabled }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Background Web Monitor",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Enable or disable global background website check operations",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isTrackerEnabled,
+                        onCheckedChange = { isTrackerEnabled = it },
+                        modifier = Modifier.testTag("global_tracker_switch")
+                    )
+                }
 
                 // Background check intervals dropdown
                 Column {
@@ -916,7 +950,13 @@ fun SettingsDialog(
                     settingsStorage.saveGeminiApiKey(apiKey)
                     settingsStorage.saveAiModel(selectedModel)
                     settingsStorage.saveTrackerIntervalMinutes(selectedIntervalMins)
+                    settingsStorage.saveTrackerEnabled(isTrackerEnabled)
                     onSaveInterval()
+                    try {
+                        TileService.requestListeningState(context, ComponentName(context, WebMonitorTileService::class.java))
+                    } catch (e: Exception) {
+                        Log.e("SettingsDialog", "Failed to update Quick Settings tile listener", e)
+                    }
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
