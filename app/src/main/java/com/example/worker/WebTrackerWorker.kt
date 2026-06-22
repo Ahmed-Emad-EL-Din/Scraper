@@ -116,11 +116,12 @@ class WebTrackerWorker(
 
         // Setup robust client timeouts (15 seconds) to prevent infinite hangs
         val okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .followRedirects(true)
-            .cookieJar(com.example.data.PersistentCookieJar(applicationContext))
+            .cookieJar(com.example.data.RealTimeWebViewCookieJar())
+            .addInterceptor(com.example.data.Http419Interceptor())
             .build()
 
         for ((url, urlRules) in rulesByUrl) {
@@ -269,7 +270,7 @@ class WebTrackerWorker(
                                 }
 
                                 val retryClient = okHttpClient.newBuilder()
-                                    .cookieJar(com.example.data.PersistentCookieJar(applicationContext))
+                                    .cookieJar(com.example.data.RealTimeWebViewCookieJar())
                                     .build()
 
                                 val retryResponse = retryClient.newCall(retryRequestBuilder.build()).execute()
@@ -714,6 +715,11 @@ class WebTrackerWorker(
             override fun onPageFinished(view: WebView?, finishedUrl: String?) {
                 super.onPageFinished(view, finishedUrl)
                 Log.d(tag, "onPageFinished triggered for: $finishedUrl")
+                try {
+                    android.webkit.CookieManager.getInstance().flush()
+                } catch (e: Exception) {
+                    Log.e(tag, "Failed to flush CookieManager in headless WebView onPageFinished", e)
+                }
                 
                  settlementTimer?.cancel()
                 settlementTimer = java.util.Timer().apply {

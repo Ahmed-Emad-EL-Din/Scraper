@@ -158,3 +158,137 @@ class PersistentCookieJar(context: Context) : CookieJar {
         }
     }
 }
+
+class RealTimeWebViewCookieJar : CookieJar {
+    private val webViewCookieManager = CookieManager.getInstance()
+
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        if (cookies.isEmpty()) return
+        try {
+            val urlString = url.toString()
+            for (cookie in cookies) {
+                webViewCookieManager.setCookie(urlString, cookie.toString())
+            }
+            webViewCookieManager.flush()
+        } catch (e: Exception) {
+            Log.e("RealTimeCookieJar", "Failed to save cookies to WebView CookieManager", e)
+        }
+    }
+
+    override fun loadForRequest(url: HttpUrl): List<Cookie> {
+        val cookiesList = mutableListOf<Cookie>()
+        try {
+            val urlString = url.toString()
+            val cookieString = webViewCookieManager.getCookie(urlString)
+            if (!cookieString.isNullOrBlank()) {
+                val pairs = cookieString.split(";")
+                for (pair in pairs) {
+                    val trimmed = pair.trim()
+                    if (trimmed.isEmpty()) continue
+                    val index = trimmed.indexOf('=')
+                    if (index == -1) continue
+                    val name = trimmed.substring(0, index).trim()
+                    val value = trimmed.substring(index + 1).trim()
+                    try {
+                        val cookie = Cookie.Builder()
+                            .name(name)
+                            .value(value)
+                            .domain(url.host)
+                            .build()
+                        cookiesList.add(cookie)
+                    } catch (e: Exception) {
+                        Log.e("RealTimeCookieJar", "Failed to parse individual cookie segment: $trimmed", e)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("RealTimeCookieJar", "Failed to load cookies from real-time CookieManager", e)
+        }
+        return cookiesList
+    }
+}
+
+class Http419Interceptor : okhttp3.Interceptor {
+    companion object {
+        // Thread-safe cache for CSRF tokens by domain/base URL
+        val csrfTokensCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    }
+
+    override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
+        val originalRequest = chain.request()
+        val url = originalRequest.url
+        val urlString = url.toString()
+        val host = url.host
+        val scheme = url.scheme
+        val port = url.port
+        
+        // Generate Deep Headers
+        // Origin: Base URL of the website
+        val originStr = if ((port == 80 && scheme == "http") || (port == 443 && scheme == "https") || port == -1) {
+            "$scheme://$host"
+        } else {
+            "$scheme://$host:$port"
+        }
+        val refererStr = urlString
+        
+        val updatedRequestBuilder = originalRequest.newBuilder()
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Origin", originStr)
+            .header("Referer", refererStr)
+            
+        // If we have a cached static or dynamic CSRF token for this host, append it!
+        val cachedToken = csrfTokensCache[host]
+        if (cachedToken != null) {
+            updatedRequestBuilder.header("X-CSRF-TOKEN", cachedToken)
+            Log.d("Interceptor419", "Appended cached X-CSRF-TOKEN: $cachedToken")
+        }
+            
+        val request = updatedRequestBuilder.build()
+        val response = chain.proceed(request)
+        
+        if (response.code == 419) {
+            val tag = "Interceptor419"
+            val cookiesHeader = request.header("Cookie") ?: "No Cookie Header"
+            val webViewCookies = CookieManager.getInstance().getCookie(urlString) ?: "No WebView Cookies"
+            
+            // Peak/peek Response body safely
+            val responseBody = response.peekBody(1024 * 1024) // 1MB max for safety
+            val html = responseBody.string()
+            
+            Log.e(tag, """
+                |--- EXTREME 419 ERROR LOG ---
+                |URL: $urlString
+                |Request Headers:
+                |${request.headers}
+                |Cookies Injected in Request Header: $cookiesHeader
+                |Cookies present in CookieManager: $webViewCookies
+                |Response Code: 419
+                |Response Body (HTML):
+                |$html
+                |-----------------------------
+            """.trimMargin())
+        } else {
+            // Passive HTML parsing to hunt for standard CSRF meta tags
+            val contentType = response.body?.contentType()
+            if (contentType != null && (contentType.toString().contains("text/html") || contentType.subtype.contains("html"))) {
+                try {
+                    val responseBody = response.peekBody(512 * 1024) // peek first 512KB for meta tags
+                    val html = responseBody.string()
+                    val doc = org.jsoup.Jsoup.parse(html)
+                    val metaElement = doc.select("meta[name=csrf-token]").first()
+                    if (metaElement != null) {
+                        val token = metaElement.attr("content")
+                        if (token.isNotEmpty()) {
+                            csrfTokensCache[host] = token
+                            Log.d("Interceptor419", "Dynamically discovered & cached CSRF token for host $host: $token")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("Interceptor419", "Failed to parse HTML for CSRF token discovery", e)
+                }
+            }
+        }
+        
+        return response
+    }
+}

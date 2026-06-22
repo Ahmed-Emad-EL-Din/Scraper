@@ -303,10 +303,26 @@ fun BrowserScreen(
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
+                        
                         val cookieManager = CookieManager.getInstance()
                         cookieManager.setAcceptCookie(true)
                         cookieManager.setAcceptThirdPartyCookies(this, true)
                         webViewClient = object : WebViewClient() {
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): android.webkit.WebResourceResponse? {
+                                request?.let { req ->
+                                    val reqUrl = req.url?.toString() ?: ""
+                                    val headers = req.requestHeaders
+                                    android.util.Log.d("WebViewSpy", "WebView Success Request: $reqUrl | Headers: $headers")
+                                }
+                                return super.shouldInterceptRequest(view, request)
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 url?.let { pageUrl ->
@@ -314,9 +330,8 @@ fun BrowserScreen(
                                     currentUrl = pageUrl
                                     
                                     // Seamless session persistence tracking sequence
-                                    val cookieManager = CookieManager.getInstance()
-                                    cookieManager.flush()
-                                    val cookies = cookieManager.getCookie(pageUrl)
+                                    android.webkit.CookieManager.getInstance().flush()
+                                    val cookies = android.webkit.CookieManager.getInstance().getCookie(pageUrl)
                                     
                                     // Grab the exact current User-Agent dynamically from WebView and store it
                                     val currentUa = settings.userAgentString
