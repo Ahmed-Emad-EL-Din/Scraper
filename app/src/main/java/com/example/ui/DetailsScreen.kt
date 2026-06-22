@@ -314,11 +314,12 @@ fun DetailsScreen(
                                 color = Color(0xFFD32F2F)
                             )
                             Spacer(modifier = Modifier.height(6.dp))
+                            val hasPreviousText = !currentRule.previousText.isNullOrBlank()
                             Text(
-                                text = currentRule.previousText ?: currentRule.lastKnownText,
+                                text = currentRule.previousText ?: "No changes detected yet.",
                                 fontSize = 13.sp,
                                 color = Color(0xFFD32F2F),
-                                textDecoration = TextDecoration.LineThrough,
+                                textDecoration = if (hasPreviousText) TextDecoration.LineThrough else TextDecoration.None,
                                 minLines = 4,
                                 maxLines = 10,
                                 overflow = TextOverflow.Ellipsis

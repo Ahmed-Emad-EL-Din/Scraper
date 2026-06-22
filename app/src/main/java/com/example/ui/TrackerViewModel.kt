@@ -156,14 +156,15 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
         checkIntervalMinutes: Int = 15,
         isTrackWholePage: Boolean = false,
         isTrackList: Boolean = false,
-        aiCondition: String? = null
+        aiCondition: String? = null,
+        initialText: String = "Waiting for check"
     ) {
         viewModelScope.launch {
             repository.insertRule(
                 TrackingRule(
                     url = url,
                     cssSelector = cssSelector,
-                    lastKnownText = "Waiting for check",
+                    lastKnownText = initialText.trim().ifEmpty { "Waiting for check" },
                     isPremiumRule = isPremium,
                     aiPrompt = aiPrompt,
                     checkIntervalMinutes = checkIntervalMinutes,

@@ -103,6 +103,9 @@ class WebTrackerWorker(
 
         val currentTime = System.currentTimeMillis()
         val rulesByUrl = rules.groupBy { it.url }
+        
+        val settingsStorage = com.example.data.SettingsStorage(applicationContext)
+        val activeUserAgent = settingsStorage.getUserAgent()
 
         // Setup robust client timeouts (15 seconds) to prevent infinite hangs
         val okHttpClient = OkHttpClient.Builder()
@@ -110,6 +113,7 @@ class WebTrackerWorker(
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
             .followRedirects(true)
+            .cookieJar(com.example.data.PersistentCookieJar(applicationContext))
             .build()
 
         for ((url, urlRules) in rulesByUrl) {
@@ -130,46 +134,72 @@ class WebTrackerWorker(
                 // Ensure Jsoup connects include timeout as well if used
                 val jsoupConn = Jsoup.connect(url).timeout(15000)
 
-                val cookies = cookieStorage.getCookies(url)
                 val requestBuilder = Request.Builder()
                     .url(url)
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
-                
-                if (!cookies.isNullOrBlank()) {
-                    requestBuilder.header("Cookie", cookies)
-                }
+                    .header("User-Agent", activeUserAgent)
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Accept-Encoding", "gzip, deflate, br")
+                    .header("Upgrade-Insecure-Requests", "1")
+                    .header("Sec-Fetch-Dest", "document")
+                    .header("Sec-Fetch-Mode", "navigate")
+                    .header("Sec-Fetch-Site", "none")
+                    .header("Sec-Fetch-User", "?1")
 
                 val response = okHttpClient.newCall(requestBuilder.build()).execute()
 
-                // Session Expiry Handling
+                // Session Expiry Handling & Scraping Logic
                 val finalUrl = response.request.url.toString()
                 val responseBodyText = response.body?.string() ?: ""
-                val isLoginPage = finalUrl.contains("/login", ignoreCase = true) ||
-                        finalUrl.contains("/signin", ignoreCase = true) ||
-                        responseBodyText.contains("type=\"password\"", ignoreCase = true) ||
-                        responseBodyText.contains("name=\"password\"", ignoreCase = true)
-
-                if (response.code == 401 || isLoginPage) {
-                    Log.w(tag, "Session Expired detected for URL: $url (Code: ${response.code}, LoginPage: $isLoginPage)")
-                    
-                    // Pauses WorkManager and tells user to re-login
-                    WorkManager.getInstance(applicationContext).cancelUniqueWork("WebTrackerWorker")
-                    sendNotifications(
-                        id = 9999,
-                        title = "Session Expired",
-                        message = "Your active login session expired. Please open the app and log in again."
-                    )
-                    return Result.success()
-                }
-
-                if (!response.isSuccessful) {
-                    Log.e(tag, "Scraping failed with non-200 code: ${response.code}")
-                    continue
-                }
-
                 val document = Jsoup.parse(responseBodyText)
 
                 for (rule in dueRules) {
+                    val wasRedirectedToLogin = if (url.contains("/login", ignoreCase = true) || url.contains("/signin", ignoreCase = true)) {
+                        false
+                    } else {
+                        val isFinalUrlLogin = finalUrl.contains("/login", ignoreCase = true) || finalUrl.contains("/signin", ignoreCase = true)
+                        val hasSelector = if (!rule.isTrackWholePage && !rule.cssSelector.isNullOrBlank()) {
+                            document.select(rule.cssSelector).isNotEmpty()
+                        } else {
+                            true
+                        }
+                        isFinalUrlLogin && !hasSelector
+                    }
+
+                    val isSessionExpired = response.code == 401 || response.code == 403 || response.code == 419 || wasRedirectedToLogin || (
+                        !rule.isTrackWholePage && !rule.cssSelector.isNullOrBlank() && 
+                        document.select(rule.cssSelector).isEmpty() && 
+                        (responseBodyText.contains("type=\"password\"", ignoreCase = true) || responseBodyText.contains("name=\"password\"", ignoreCase = true))
+                    )
+
+                    if (isSessionExpired) {
+                        Log.w(tag, "Session Expired detected for rule: ${rule.id} (URL: ${rule.url})")
+                        dao.updateRule(
+                            rule.copy(
+                                isPaused = true,
+                                lastKnownText = "Session Expired (Please login again)",
+                                lastCheckedTimeMillis = currentTime
+                            )
+                        )
+                        sendNotifications(
+                            id = rule.id,
+                            title = "Session Expired",
+                            message = "Your active login session expired for: ${cleanUrlForDisplay(rule.url)}. Please open the browser and log in again."
+                        )
+                        continue
+                    }
+
+                    if (!response.isSuccessful) {
+                        Log.e(tag, "Scraping failed with non-200 code: ${response.code}")
+                        dao.updateRule(
+                            rule.copy(
+                                lastCheckedTimeMillis = currentTime,
+                                lastKnownText = "Error: Server returned code ${response.code}"
+                            )
+                        )
+                        continue
+                    }
+
                     val newText = if (rule.isTrackWholePage || rule.cssSelector.isNullOrBlank()) {
                         document.text().trim()
                     } else if (rule.isTrackList) {
@@ -192,6 +222,16 @@ class WebTrackerWorker(
                     }
 
                     Log.d(tag, "Rule [${rule.id}] Selector: ${rule.cssSelector} -> New Text: $newText")
+
+                    if (newText.isEmpty() && !rule.isTrackWholePage && !rule.cssSelector.isNullOrBlank()) {
+                        Log.w(tag, "Rule [${rule.id}]: Scraped empty text for selector: ${rule.cssSelector}. Site may be dynamic or loading. Preserving last known text: ${rule.lastKnownText}")
+                        dao.updateRule(
+                            rule.copy(
+                                lastCheckedTimeMillis = currentTime
+                            )
+                        )
+                        continue
+                    }
 
                     if (rule.lastKnownText == "Waiting for check") {
                         // First run initialization, don't trigger alert yet but initialize the text
@@ -328,6 +368,18 @@ class WebTrackerWorker(
 
             } catch (e: Exception) {
                 Log.e(tag, "Connection/Scraping error checking URL: $url", e)
+                for (rule in dueRules) {
+                    try {
+                        dao.updateRule(
+                            rule.copy(
+                                lastCheckedTimeMillis = currentTime,
+                                lastKnownText = "Error: ${e.localizedMessage ?: "Connection failed"}"
+                            )
+                        )
+                    } catch (dbEx: Exception) {
+                        Log.e(tag, "Failed to update db error state for rule ${rule.id}", dbEx)
+                    }
+                }
             }
         }
 

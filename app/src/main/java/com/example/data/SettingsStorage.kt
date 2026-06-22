@@ -27,6 +27,7 @@ class SettingsStorage(context: Context) {
         private const val KEY_AI_MODEL = "ai_model"
         private const val KEY_TRACKER_INTERVAL_MINUTES = "tracker_interval_minutes"
         private const val KEY_TRACKER_ENABLED = "tracker_enabled"
+        private const val KEY_USER_AGENT = "user_agent"
     }
 
     fun saveGeminiApiKey(apiKey: String) {
@@ -35,6 +36,14 @@ class SettingsStorage(context: Context) {
 
     fun getGeminiApiKey(): String {
         return sharedPrefs.getString(KEY_GEMINI_API_KEY, "") ?: ""
+    }
+
+    fun saveUserAgent(userAgent: String) {
+        sharedPrefs.edit().putString(KEY_USER_AGENT, userAgent).apply()
+    }
+
+    fun getUserAgent(): String {
+        return sharedPrefs.getString(KEY_USER_AGENT, "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36") ?: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
     }
 
     fun saveAiModel(model: String) {

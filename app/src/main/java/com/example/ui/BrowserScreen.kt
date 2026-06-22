@@ -100,6 +100,7 @@ fun BrowserScreen(
     
     // Encrypted Cookie storage initialization
     val cookieStorage = remember { CookieStorage(context) }
+    val settingsStorage = remember { com.example.data.SettingsStorage(context) }
     
     // Banner / UI state variables
     var showPersistenceBanner by remember { mutableStateOf(false) }
@@ -302,6 +303,9 @@ fun BrowserScreen(
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
+                        val cookieManager = CookieManager.getInstance()
+                        cookieManager.setAcceptCookie(true)
+                        cookieManager.setAcceptThirdPartyCookies(this, true)
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
@@ -311,10 +315,18 @@ fun BrowserScreen(
                                     
                                     // Seamless session persistence tracking sequence
                                     val cookieManager = CookieManager.getInstance()
+                                    cookieManager.flush()
                                     val cookies = cookieManager.getCookie(pageUrl)
+                                    
+                                    // Grab the exact current User-Agent dynamically from WebView and store it
+                                    val currentUa = settings.userAgentString
+                                    if (!currentUa.isNullOrBlank()) {
+                                        settingsStorage.saveUserAgent(currentUa)
+                                    }
                                     
                                     if (!cookies.isNullOrBlank()) {
                                         cookieStorage.saveCookies(pageUrl, cookies)
+                                        com.example.data.PersistentCookieJar.saveWebViewCookiesToDb(context, pageUrl, cookies)
                                         
                                         val host = java.net.URI(pageUrl).host ?: ""
                                         val domain = if (host.startsWith("www.")) host.substring(4) else host
@@ -341,6 +353,12 @@ fun BrowserScreen(
                             supportZoom()
                             builtInZoomControls = true
                             displayZoomControls = false
+                            
+                            // Initialize User-Agent persistence on startup
+                            val initialUa = userAgentString
+                            if (!initialUa.isNullOrBlank()) {
+                                settingsStorage.saveUserAgent(initialUa)
+                            }
                         }
                         
                         // Add JS Interface safely named WebViewTrackerBridge
@@ -692,7 +710,8 @@ fun BrowserScreen(
                                 checkIntervalMinutes = selectedInterval,
                                 isTrackWholePage = setupData.isWholePage,
                                 isTrackList = if (setupData.isWholePage) false else trackModeByList,
-                                aiCondition = if (isPremiumFilterActive) aiConditionPromptInput else null
+                                aiCondition = if (isPremiumFilterActive) aiConditionPromptInput else null,
+                                initialText = setupData.textPreview
                             )
                             showSetupDialog = null
                             Toast.makeText(context, "Tracker added successfully!", Toast.LENGTH_SHORT).show()

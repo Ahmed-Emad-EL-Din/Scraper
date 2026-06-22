@@ -5,10 +5,11 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [TrackingRule::class, TrackingHistory::class], version = 4, exportSchema = false)
+@Database(entities = [TrackingRule::class, TrackingHistory::class, PersistedCookie::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun trackingRuleDao(): TrackingRuleDao
     abstract fun trackingHistoryDao(): TrackingHistoryDao
+    abstract fun persistedCookieDao(): PersistedCookieDao
 
     companion object {
         @Volatile
