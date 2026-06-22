@@ -1,7 +1,12 @@
 package com.example.ui
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -75,6 +80,72 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
+     * Dispatch an immediate one-time track scan check for all active rules
+     */
+    fun runImmediateCheck(application: Application) {
+        try {
+            Log.d(tag, "Scheduling an immediate check via OneTimeWorkRequest...")
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val workInput = androidx.work.workDataOf("is_forced" to true)
+            val workRequest = androidx.work.OneTimeWorkRequestBuilder<WebTrackerWorker>()
+                .setConstraints(constraints)
+                .setInputData(workInput)
+                .build()
+
+            WorkManager.getInstance(application).enqueueUniqueWork(
+                "WebTrackerWorkerImmediate",
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                workRequest
+            )
+            Log.d(tag, "Successfully queued immediate check request")
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to run immediate check", e)
+        }
+    }
+
+    /**
+     * Post helper notification for system status updates
+     */
+    fun sendActivityNotification(context: Context, title: String, message: String) {
+        val channelId = "webview_tracker_updates"
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Web Monitor Background Activity",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notifies when Web Monitor tasks change status."
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(9999, notification)
+    }
+
+    private fun cleanUrlForDisplay(url: String): String {
+        return try {
+            val uri = java.net.URI(url)
+            val host = uri.host ?: url
+            if (host.startsWith("www.")) host.substring(4) else host
+        } catch (e: Exception) {
+            url
+        }
+    }
+
+    /**
      * Add tracking rule to the database (coroutine scope handled)
      */
     fun addRule(
@@ -103,6 +174,16 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
             )
             // Re-schedule just in case WorkManager was paused due to a prior Session Expired event.
             scheduleBackgroundChecks(getApplication())
+
+            // Immediately send dynamic notification
+            sendActivityNotification(
+                getApplication(),
+                "Tracking Started",
+                "Website monitoring successfully configured for: ${cleanUrlForDisplay(url)}"
+            )
+
+            // Force run an immediate check so the user doesn't wait 15 minutes
+            runImmediateCheck(getApplication())
         }
     }
 
@@ -120,7 +201,20 @@ class TrackerViewModel(application: Application) : AndroidViewModel(application)
      */
     fun togglePauseRule(rule: TrackingRule) {
         viewModelScope.launch {
-            repository.updateRule(rule.copy(isPaused = !rule.isPaused))
+            val nextPaused = !rule.isPaused
+            repository.updateRule(rule.copy(isPaused = nextPaused))
+
+            val stateName = if (nextPaused) "Paused" else "Resumed"
+            sendActivityNotification(
+                getApplication(),
+                "Tracking $stateName",
+                "Website checks are now $stateName for ${cleanUrlForDisplay(rule.url)}"
+            )
+
+            if (!nextPaused) {
+                // If checking is resumed/reactivated, trigger an immediate scan check to sync
+                runImmediateCheck(getApplication())
+            }
         }
     }
 

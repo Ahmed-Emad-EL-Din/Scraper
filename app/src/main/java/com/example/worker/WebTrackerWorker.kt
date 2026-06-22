@@ -93,6 +93,8 @@ class WebTrackerWorker(
             Log.e(tag, "Failed to start foreground service", e)
         }
 
+        val isForced = inputData.getBoolean("is_forced", false)
+
         val rules = dao.getAllRulesDirect().filter { !it.isPaused }
         if (rules.isEmpty()) {
             Log.d(tag, "No active tracking rules. Stopping work.")
@@ -114,7 +116,7 @@ class WebTrackerWorker(
             // Check if any rule for this URL is due for update
             val dueRules = urlRules.filter { rule ->
                 val elapsedMinutes = (currentTime - rule.lastCheckedTimeMillis) / (1000 * 60)
-                rule.lastCheckedTimeMillis == 0L || elapsedMinutes >= rule.checkIntervalMinutes
+                isForced || rule.lastKnownText == "Waiting for check" || rule.lastCheckedTimeMillis == 0L || elapsedMinutes >= rule.checkIntervalMinutes
             }
 
             if (dueRules.isEmpty()) {

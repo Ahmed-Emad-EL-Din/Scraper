@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -110,6 +111,18 @@ fun DashboardScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = {
+                            viewModel.runImmediateCheck(context.applicationContext as android.app.Application)
+                        },
+                        modifier = Modifier.testTag("manual_refresh_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Scan Now",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                    IconButton(
                         onClick = { showSettingsDialog = true },
                         modifier = Modifier.testTag("settings_btn")
                     ) {
@@ -155,6 +168,7 @@ fun DashboardScreen(
                 onDelete = { viewModel.deleteRule(it.id) },
                 onTogglePause = { viewModel.togglePauseRule(it) },
                 onRuleClick = onNavigateToDetails,
+                onForceScan = { viewModel.runImmediateCheck(context.applicationContext as android.app.Application) },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
@@ -315,6 +329,7 @@ fun ActiveRulesView(
     onDelete: (TrackingRule) -> Unit,
     onTogglePause: (TrackingRule) -> Unit,
     onRuleClick: (TrackingRule) -> Unit,
+    onForceScan: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
@@ -371,7 +386,8 @@ fun ActiveRulesView(
                             rule = rule,
                             onDelete = { onDelete(rule) },
                             onTogglePause = { onTogglePause(rule) },
-                            onClick = { onRuleClick(rule) }
+                            onClick = { onRuleClick(rule) },
+                            onForceScan = onForceScan
                         )
                     }
                 )
@@ -385,7 +401,8 @@ fun RuleItemCard(
     rule: TrackingRule,
     onDelete: () -> Unit,
     onTogglePause: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onForceScan: () -> Unit
 ) {
     val lastCheckedStr = if (rule.lastCheckedTimeMillis > 0L) {
         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(rule.lastCheckedTimeMillis))
@@ -541,26 +558,53 @@ fun RuleItemCard(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    androidx.compose.material3.TextButton(
-                        onClick = onClick,
-                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                            contentColor = if (rule.isPaused) IndigoPrimary.copy(alpha = 0.5f) else IndigoPrimary
-                        ),
-                        modifier = Modifier
-                            .height(28.dp)
-                            .testTag("history_button_${rule.id}"),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        androidx.compose.material3.TextButton(
+                            onClick = onForceScan,
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                contentColor = if (rule.isPaused) IndigoPrimary.copy(alpha = 0.5f) else IndigoPrimary
+                            ),
+                            modifier = Modifier
+                                .height(28.dp)
+                                .testTag("scan_button_${rule.id}"),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text("History", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Scan",
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text("Scan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        androidx.compose.material3.TextButton(
+                            onClick = onClick,
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                contentColor = if (rule.isPaused) IndigoPrimary.copy(alpha = 0.5f) else IndigoPrimary
+                            ),
+                            modifier = Modifier
+                                .height(28.dp)
+                                .testTag("history_button_${rule.id}"),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text("History", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
